@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 问答</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div id="chat-container">
+        <div id="chat-box">
+            <div class="message assistant">
+                <div class="content">你好！我是 GLM-4 Flash，有什么可以帮助你的吗？</div>
+            </div>
+        </div>
+        <form id="chat-form">
+            <textarea id="user-input" placeholder="输入你的问题..." required></textarea>
+            <button type="submit">发送</button>
+        </form>
+    </div>
+
+    <script>
+        const chatForm = document.getElementById('chat-form');
+        const userInput = document.getElementById('user-input');
+        const chatBox = document.getElementById('chat-box');
+
+        let conversationHistory = [{
+            role: 'assistant',
+            content: '你好！我是 GLM-4 Flash，有什么可以帮助你的吗？'
+        }];
+
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userMessage = userInput.value.trim();
+            if (!userMessage) return;
+
+            appendMessage('user', userMessage);
+            conversationHistory.push({ role: 'user', content: userMessage });
+            userInput.value = '';
+            userInput.focus();
+            
+            const aiMessageDiv = appendMessage('assistant', '');
+            const aiContentDiv = aiMessageDiv.querySelector('.content');
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ messages: conversationHistory }),
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let fullResponse = '';
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = line.substring(6);
+                            if (data.trim() === '[DONE]') {
+                                return;
+                            }
+                            try {
+                                const parsed = JSON.parse(data);
+                                if (parsed.error) {
+                                    throw new Error(`Server error: ${parsed.error}`);
+                                }
+                                if (parsed.content) {
+                                    fullResponse += parsed.content;
+                                    aiContentDiv.innerHTML += parsed.content.replace(/\n/g, '<br>');
+                                    chatBox.scrollTop = chatBox.scrollHeight;
+                                }
+                            } catch (e) {
+                                console.error('Error parsing JSON:', e);
+                            }
+                        }
+                    }
+                }
+                 conversationHistory.push({ role: 'assistant', content: fullResponse });
+
+            } catch (error) {
+                console.error('Fetch error:', error);
+                aiContentDiv.innerText = `抱歉，请求出错: ${error.message}`;
+            } finally {
+                conversationHistory.push({ role: 'assistant', content: aiContentDiv.innerText });
+            }
+        });
+
+        function appendMessage(role, content) {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message', role);
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.classList.add('content');
+            contentDiv.innerText = content;
+            
+            messageDiv.appendChild(contentDiv);
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+            return messageDiv;
+        }
+
+        // 允许使用 Shift+Enter 换行
+        userInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                chatForm.dispatchEvent(new Event('submit'));
+            }
+        });
+
+    </script>
+</body>
+</html> 
